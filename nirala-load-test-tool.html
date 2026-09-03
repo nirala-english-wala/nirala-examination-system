@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Load Test Tool - Nirala English Wala</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: linear-gradient(135deg, #1a3d6d, #2c5aa0);
+    margin: 0; padding: 16px; color: #222;
+  }
+  .container { max-width: 700px; margin: 0 auto; }
+  header { text-align: center; color: #fff; margin-bottom: 16px; }
+  header h1 { margin: 0; font-size: 1.4em; }
+  header p { opacity: 0.85; margin: 4px 0 0; font-size: 0.85em; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; margin-bottom: 14px; box-shadow: 0 3px 10px rgba(0,0,0,0.15); }
+  textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-family: monospace; font-size: 0.9em; }
+  button { padding: 12px 18px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1em; width: 100%; margin-top: 10px; }
+  .btn-primary { background: #1a3d6d; color: #fff; }
+  .warn-box { background: #fff3e0; border: 1px solid #ffb74d; border-radius: 8px; padding: 12px; font-size: 0.85em; color: #e65100; margin-bottom: 10px; }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .summary div { flex: 1; min-width: 100px; background: #f0f4fa; border-radius: 8px; padding: 10px; text-align: center; }
+  .summary .big { font-size: 1.5em; font-weight: bold; }
+  .green { color: #2e7d32; }
+  .red { color: #e53935; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.8em; }
+  th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+  #progressText { text-align: center; font-size: 0.9em; color: #666; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🧪 Load Test Tool</h1>
+    <p>Simulate many students taking a test at the same time</p>
+  </header>
+
+  <div class="card">
+    <div class="warn-box">
+      ⚠️ <b>Only use this with DUMMY test codes</b> (a fake test/students made just for testing), never with real students' codes — each code used here gets permanently marked as "completed" with random answers, just like a real submission.
+    </div>
+    <label style="font-weight:bold; color:#1a3d6d;">Paste Access Codes (one per line)</label>
+    <textarea id="codesInput" rows="8" placeholder="ABC123&#10;XYZ789&#10;...(paste codes copied from the admin panel)"></textarea>
+    <button class="btn-primary" id="runBtn">▶ Run Load Test</button>
+    <p id="progressText"></p>
+  </div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <h3 style="margin-top:0; color:#1a3d6d;">Results</h3>
+    <div class="summary">
+      <div><div class="big" id="totalCount">0</div>Total</div>
+      <div><div class="big green" id="successCount">0</div>Succeeded</div>
+      <div><div class="big red" id="failCount">0</div>Failed</div>
+      <div><div class="big" id="avgTime">0s</div>Avg Time</div>
+    </div>
+    <table id="failTable" style="display:none;">
+      <thead><tr><th>Code</th><th>Error</th></tr></thead>
+      <tbody id="failList"></tbody>
+    </table>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, getDoc, updateDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAYmRr2jaXJayWfH59J2vG1eRfq231QlFk",
+  authDomain: "nirala-english-wala.firebaseapp.com",
+  projectId: "nirala-english-wala",
+  storageBucket: "nirala-english-wala.firebasestorage.app",
+  messagingSenderId: "272386406767",
+  appId: "1:272386406767:web:00712880f0aa5039dc509a"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+async function simulateOneStudent(code) {
+  const t0 = performance.now();
+  const attemptRef = doc(db, 'attempts', code);
+  const attemptSnap = await getDoc(attemptRef);
+  if (!attemptSnap.exists()) throw new Error('Code not found');
+  const attempt = attemptSnap.data();
+  if (attempt.used) throw new Error('Code already used');
+
+  const testSnap = await getDoc(doc(db, 'tests', attempt.testId));
+  if (!testSnap.exists()) throw new Error('Test not found');
+
+  const qSnap = await getDocs(collection(db, 'tests', attempt.testId, 'questions'));
+  const studentAnswers = [];
+  qSnap.forEach(d => {
+    studentAnswers.push({ questionId: d.id, selected: Math.floor(Math.random() * 4) });
+  });
+
+  await updateDoc(attemptRef, {
+    used: true, status: 'completed', studentAnswers,
+    violations: 0, startedAt: Date.now(), completedAt: Date.now()
+  });
+
+  const t1 = performance.now();
+  return (t1 - t0) / 1000;
+}
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  const codes = document.getElementById('codesInput').value
+    .split('\n').map(c => c.trim().toUpperCase()).filter(Boolean);
+
+  if (!codes.length) { alert('Please paste at least one code.'); return; }
+  if (!confirm(`This will simulate ${codes.length} students submitting at the same time, using the codes you pasted. Continue?`)) return;
+
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('progressText').textContent = `Running ${codes.length} simulated students...`;
+  document.getElementById('resultsCard').style.display = 'none';
+
+  const startAll = performance.now();
+  const results = await Promise.allSettled(codes.map(code => simulateOneStudent(code)));
+  const totalTime = (performance.now() - startAll) / 1000;
+
+  const succeeded = results.filter(r => r.status === 'fulfilled');
+  const failed = results.filter(r => r.status === 'rejected');
+  const avgTime = succeeded.length
+    ? (succeeded.reduce((sum, r) => sum + r.value, 0) / succeeded.length).toFixed(2)
+    : '0';
+
+  document.getElementById('totalCount').textContent = codes.length;
+  document.getElementById('successCount').textContent = succeeded.length;
+  document.getElementById('failCount').textContent = failed.length;
+  document.getElementById('avgTime').textContent = avgTime + 's';
+  document.getElementById('progressText').textContent = `Done in ${totalTime.toFixed(1)}s total (all running at the same time).`;
+
+  if (failed.length) {
+    const failTable = document.getElementById('failTable');
+    const failList = document.getElementById('failList');
+    failList.innerHTML = '';
+    failed.forEach((r, i) => {
+      const code = codes[results.indexOf(r)];
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${code}</td><td>${r.reason.message || r.reason}</td>`;
+      failList.appendChild(tr);
+    });
+    failTable.style.display = 'table';
+  }
+
+  document.getElementById('resultsCard').style.display = 'block';
+  document.getElementById('runBtn').disabled = false;
+});
+</script>
+</body>
+</html>
